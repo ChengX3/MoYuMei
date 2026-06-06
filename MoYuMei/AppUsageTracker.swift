@@ -19,6 +19,40 @@ struct AppUsageRecord: Identifiable {
     }
 }
 
+enum OvertimeDurationMode: String, CaseIterable, Identifiable {
+    case actual = "实际时长"
+    case halfDay = "半天"
+    case fullDay = "全天"
+
+    var id: String { rawValue }
+
+    var dayFraction: Double {
+        switch self {
+        case .actual: return 0
+        case .halfDay: return 0.5
+        case .fullDay: return 1
+        }
+    }
+}
+
+enum OvertimeSettlement {
+    case unpaid
+    case hourly(amount: Double)
+    case fixed(amount: Double)
+    case salaryMultiplier(multiplier: Double, duration: OvertimeDurationMode)
+
+    var isSingleCharge: Bool {
+        switch self {
+        case .fixed:
+            return true
+        case .salaryMultiplier(_, let duration):
+            return duration != .actual
+        case .unpaid, .hourly:
+            return false
+        }
+    }
+}
+
 class AppUsageTracker: ObservableObject {
     @Published var records: [AppUsageRecord] = []
     @Published var isFishingMode: Bool = false  // 手动切换：摸鱼中 / 搬砖中
@@ -46,7 +80,7 @@ class AppUsageTracker: ObservableObject {
     private var activeDayKey: String?
     private var overtimeModeActive = false
     private var overtimeStart: Date?
-    private var currentOvertimeAmount: Double?
+    private var currentOvertimeSettlement: OvertimeSettlement = .unpaid
     private var currentOvertimeFixedPaid = false
     // storage: bundleID -> (name, fishingSec, workingSec, icon)
     private var storage: [String: (name: String, fishing: TimeInterval, working: TimeInterval, icon: NSImage?)] = [:]
@@ -164,7 +198,7 @@ class AppUsageTracker: ObservableObject {
         isFishingMode.toggle()
     }
 
-    func toggleOvertimeMode(amount: Double? = nil) {
+    func toggleOvertimeMode(settlement: OvertimeSettlement? = nil, delayUntilWorkEnds: Bool = false) {
         let now = Date()
         if overtimeModeActive {
             commitOvertimeIfNeeded(to: now)
@@ -175,15 +209,19 @@ class AppUsageTracker: ObservableObject {
         let shouldStart = !overtimeModeActive
         overtimeModeActive = shouldStart
         isOvertimeMode = shouldStart
-        currentOvertimeAmount = shouldStart ? amount : nil
+        currentOvertimeSettlement = shouldStart ? (settlement ?? defaultOvertimeSettlement()) : .unpaid
         currentOvertimeFixedPaid = false
-        overtimeStart = shouldStart ? now : nil
+        overtimeStart = shouldStart ? overtimeStartDate(for: now, delayUntilWorkEnds: delayUntilWorkEnds) : nil
         activeStart = now
         activeDayKey = dayKey(for: now)
     }
 
     func status(at date: Date = Date()) -> UsageStatus {
-        if overtimeModeActive { return .overtime }
+        if overtimeModeActive,
+           salaryManager?.isWorkingTime(at: date) != true,
+           date >= (overtimeStart ?? date) {
+            return .overtime
+        }
         guard salaryManager?.isWorkingTime(at: date) == true else { return .free }
         return currentCategory == .fishing ? .fishing : .working
     }
@@ -239,8 +277,8 @@ class AppUsageTracker: ObservableObject {
         let firstSegmentKey = segments.first.map { dayKey(for: $0.start) }
 
         for segment in segments where dayKey(for: segment.start) == key {
-            let shouldPreviewFixedIncome = firstSegmentKey == key
-            applyOvertime(from: segment.start, to: segment.end, into: &record, fixedIncomeMultiplier: shouldPreviewFixedIncome ? 1 : 0)
+            let shouldPreviewSingleCharge = currentOvertimeSettlement.isSingleCharge && !currentOvertimeFixedPaid && firstSegmentKey == key
+            applyOvertime(from: segment.start, to: segment.end, into: &record, applySingleCharge: shouldPreviewSingleCharge)
         }
 
         return record
@@ -343,20 +381,20 @@ class AppUsageTracker: ObservableObject {
     private func commitOvertime(from start: Date, to end: Date) {
         guard end > start else { return }
 
-        var didCommitFixedIncome = false
+        var didCommitSingleCharge = false
 
         for segment in nonWorkingSegments(from: start, to: end) {
             let key = dayKey(for: segment.start)
             var record = overtimeArchives[key] ?? DailyOvertimeRecord()
-            let shouldCommitFixedIncome = !currentOvertimeFixedPaid && !didCommitFixedIncome
-            applyOvertime(from: segment.start, to: segment.end, into: &record, fixedIncomeMultiplier: shouldCommitFixedIncome ? 1 : 0)
-            if shouldCommitFixedIncome, (salaryManager?.overtimePayMode ?? .unpaid) == .fixed {
-                didCommitFixedIncome = true
+            let shouldCommitSingleCharge = currentOvertimeSettlement.isSingleCharge && !currentOvertimeFixedPaid && !didCommitSingleCharge
+            applyOvertime(from: segment.start, to: segment.end, into: &record, applySingleCharge: shouldCommitSingleCharge)
+            if shouldCommitSingleCharge {
+                didCommitSingleCharge = true
             }
             publishOvertimeArchive(key: key, record: record, forceSave: true)
         }
 
-        if didCommitFixedIncome {
+        if didCommitSingleCharge {
             currentOvertimeFixedPaid = true
         }
     }
@@ -395,24 +433,61 @@ class AppUsageTracker: ObservableObject {
         return segments
     }
 
-    private func applyOvertime(from start: Date, to end: Date, into record: inout DailyOvertimeRecord, fixedIncomeMultiplier: Double) {
+    private func applyOvertime(from start: Date, to end: Date, into record: inout DailyOvertimeRecord, applySingleCharge: Bool) {
         let elapsed = max(end.timeIntervalSince(start), 0)
         guard elapsed > 0 else { return }
 
         let salary = salaryManager
-        record.seconds += elapsed
-        record.unpaidValue += elapsed * (salary?.salaryPerSecond ?? 0)
+        let salaryPerSecond = salary?.salaryPerSecond ?? 0
 
-        switch salary?.overtimePayMode ?? .unpaid {
-        case .hourly:
-            record.income += elapsed / 3600 * (salary?.overtimeAmount ?? 0)
-        case .fixed:
-            if !currentOvertimeFixedPaid {
-                record.income += (currentOvertimeAmount ?? salary?.overtimeAmount ?? 0) * fixedIncomeMultiplier
-            }
+        switch currentOvertimeSettlement {
         case .unpaid:
-            break
+            record.seconds += elapsed
+            record.unpaidValue += elapsed * salaryPerSecond
+        case .hourly(let amount):
+            record.seconds += elapsed
+            record.unpaidValue += elapsed * salaryPerSecond
+            record.income += elapsed / 3600 * max(amount, 0)
+        case .fixed(let amount):
+            record.seconds += elapsed
+            record.unpaidValue += elapsed * salaryPerSecond
+            if applySingleCharge {
+                record.income += max(amount, 0)
+                record.fixedPaid = true
+            }
+        case .salaryMultiplier(let multiplier, let duration):
+            if duration == .actual {
+                record.seconds += elapsed
+                record.unpaidValue += elapsed * salaryPerSecond
+                record.income += elapsed * salaryPerSecond * max(multiplier, 0)
+            } else if applySingleCharge {
+                let billedSeconds = (salary?.workSecondsPerDay ?? 0) * duration.dayFraction
+                record.seconds += billedSeconds
+                record.unpaidValue += billedSeconds * salaryPerSecond
+                record.income += billedSeconds * salaryPerSecond * max(multiplier, 0)
+                record.fixedPaid = true
+            }
         }
+    }
+
+    private func defaultOvertimeSettlement() -> OvertimeSettlement {
+        switch salaryManager?.overtimePayMode ?? .unpaid {
+        case .hourly:
+            return .hourly(amount: salaryManager?.overtimeAmount ?? 0)
+        case .unpaid:
+            return .unpaid
+        }
+    }
+
+    private func overtimeStartDate(for date: Date, delayUntilWorkEnds: Bool) -> Date {
+        guard delayUntilWorkEnds,
+              salaryManager?.isWorkday(at: date) == true,
+              let lastWorkEnd = salaryManager?.workingIntervals(on: date).map({ $0.end }).max(),
+              date < lastWorkEnd else {
+            return date
+        }
+
+        return lastWorkEnd
     }
 
     private func publishRecords(_ newRecords: [AppUsageRecord]) {

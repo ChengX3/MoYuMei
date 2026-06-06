@@ -62,16 +62,16 @@ struct SalarySettingsView: View {
                 }
             }
 
-            SettingsCard("加班规则", subtitle: "开启加班后，休息时段会单独计入日报。") {
+            SettingsCard("工作日加班规则", subtitle: "工作日开启加班后，只在非工作时段计入日报。") {
                 SettingRow("计费方式") {
-                    segmentedControl(values: OvertimePayMode.allCases, selection: salary.overtimePayMode, width: 260) { value in
+                    segmentedControl(values: OvertimePayMode.allCases, selection: salary.overtimePayMode, width: 180) { value in
                         salary.overtimePayMode = value
                     }
                 }
 
-                if salary.overtimePayMode != .unpaid {
+                if salary.overtimePayMode == .hourly {
                     Divider().opacity(0.35)
-                    SettingRow(salary.overtimePayMode == .hourly ? "加班时薪" : "本次固定加班收入", subtitle: salary.overtimePayMode == .hourly ? "按小时计算加班收入。" : "一次性加班的默认金额，开始时还能临时改。") {
+                    SettingRow("加班时薪", subtitle: "工作日下班后按小时计算加班收入。") {
                         HStack(spacing: 6) {
                             Text("¥").foregroundColor(.secondary)
                             TextField("", value: nonNegativeBinding($salary.overtimeAmount), format: .number)
@@ -82,7 +82,7 @@ struct SalarySettingsView: View {
                     }
                 } else {
                     Divider().opacity(0.35)
-                    Text("无偿加班不进收入，但会按正常时薪估算这段时间的白干亏损。")
+                    Text("无偿加班不进收入，但会按正常时薪估算这段时间的白干亏损。休息日加班会在点击主窗口按钮时单独选择结算方式。")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                 }

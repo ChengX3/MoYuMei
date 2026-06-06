@@ -10,7 +10,6 @@ enum WorkSchedule: String, CaseIterable, Identifiable {
 
 enum OvertimePayMode: String, CaseIterable, Identifiable {
     case hourly = "小时计费"
-    case fixed = "一次性"
     case unpaid = "无偿"
 
     var id: String { rawValue }

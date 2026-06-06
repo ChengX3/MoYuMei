@@ -14,6 +14,7 @@ struct ContentView: View {
             bottomBar
         }
         .frame(width: 330)
+        .background(ShortcutBridge().frame(width: 0, height: 0))
     }
 
     // MARK: 薪资卡
@@ -243,6 +244,7 @@ struct ContentView: View {
                     .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
+            .keyboardShortcut(",", modifiers: .command)
             .padding(.trailing, 14)
         }
         .padding(.vertical, 8)
@@ -258,7 +260,7 @@ struct ContentView: View {
         case .working: return "搬砖中"
         case .fishing: return "摸鱼中"
         case .free: return "休息中"
-        case .overtime: return "FUCK中"
+        case .overtime: return "加班中"
         }
     }
 
@@ -277,10 +279,10 @@ struct ContentView: View {
             return
         }
 
-        if salary.overtimePayMode == .fixed {
-            FixedOvertimeWindowController.shared.show(defaultAmount: salary.overtimeAmount)
+        if salary.isWorkday {
+            FixedOvertimeWindowController.shared.show(context: .workday)
         } else {
-            tracker.toggleOvertimeMode()
+            FixedOvertimeWindowController.shared.show(context: .restDay)
         }
     }
 }
