@@ -103,4 +103,3 @@ hdiutil verify MoYuMei.dmg
 
 - Linux.do 社区
 - AI 提供者：unity2.ai
-- unity2.ai 注册链接：https://unity2.ai/register?ref=GXCVFq7B
