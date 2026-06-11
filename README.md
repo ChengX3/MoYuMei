@@ -101,5 +101,5 @@ hdiutil verify MoYuMei.dmg
 
 ## 鸣谢
 
-- Linux.do 社区
+- [Linux.do](https://linux.do/) 社区
 - AI 提供者：unity2.ai
