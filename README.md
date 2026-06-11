@@ -93,6 +93,10 @@ hdiutil verify MoYuMei.dmg
 - 开发者：ChengX3
 - 项目地址：https://github.com/ChengX3/MoYuMei
 
+## 参赛作品
+
+- 本项目为参赛作品。
+- 参赛地址：https://vibecoding.unity2.ai/
 
 ## 鸣谢
 
